@@ -375,38 +375,6 @@ func (r *REPL) parseValue(input string, t *ast.Type) any {
 	}
 }
 
-func (r *REPL) buildQuery(opType string, field *ast.FieldDefinition, args map[string]any) string {
-	var sb strings.Builder
-
-	sb.WriteString(opType + " {\n  " + field.Name)
-
-	if len(args) > 0 {
-		sb.WriteString("(")
-
-		first := true
-		for k, v := range args {
-			if !first {
-				sb.WriteString(", ")
-			}
-
-			sb.WriteString(k + ": " + r.formatArg(v, r.findArgType(field, k)))
-
-			first = false
-		}
-
-		sb.WriteString(")")
-	}
-
-	// Add selection set for object types
-	if sel := r.buildSelection(field.Type); sel != "" {
-		sb.WriteString(" " + sel)
-	}
-
-	sb.WriteString("\n}")
-
-	return sb.String()
-}
-
 func (r *REPL) findArgType(field *ast.FieldDefinition, name string) *ast.Type {
 	for _, a := range field.Arguments {
 		if a.Name == name {
@@ -484,50 +452,79 @@ func (r *REPL) selectFieldsInteractive(t *ast.Type, depth int) ([]selectedField,
 		return nil, nil
 	}
 
-	// Filter out internal fields
-	var availableFields []*ast.FieldDefinition
-	for _, f := range def.Fields {
-		if !strings.HasPrefix(f.Name, "__") {
-			availableFields = append(availableFields, f)
-		}
-	}
-
+	availableFields := r.filterAvailableFields(def.Fields)
 	if len(availableFields) == 0 {
 		return nil, nil
 	}
 
-	// Build options for checkbox (with Select All at the top)
+	options, expandableIndices := r.buildFieldOptions(availableFields, depth)
+	defaultSelected := r.getDefaultSelectedFields(availableFields, options)
+
+	selected, err := r.promptFieldSelection(typeName, options, defaultSelected)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.buildSelectedFields(availableFields, options, selected, expandableIndices, depth)
+}
+
+func (r *REPL) filterAvailableFields(fields ast.FieldList) []*ast.FieldDefinition {
+	var result []*ast.FieldDefinition
+
+	for _, f := range fields {
+		if !strings.HasPrefix(f.Name, "__") {
+			result = append(result, f)
+		}
+	}
+
+	return result
+}
+
+func (r *REPL) buildFieldOptions(fields []*ast.FieldDefinition, depth int) ([]string, map[int]bool) {
 	options := []string{selectAllOption}
 	expandableIndices := make(map[int]bool)
 
-	for i, f := range availableFields {
+	for i, f := range fields {
 		fieldTypeName := gql.UnwrapType(f.Type)
 		fieldDef := r.schema.Types[fieldTypeName]
 
 		label := fmt.Sprintf("%s: %s", f.Name, gql.FormatType(f.Type))
 
-		if fieldDef != nil && (fieldDef.Kind == ast.Object || fieldDef.Kind == ast.Interface) {
-			if depth < maxSelectionDepth {
-				label += " (expandable)"
-				expandableIndices[i] = true
-			}
+		if r.isExpandableField(fieldDef, depth) {
+			label += " (expandable)"
+			expandableIndices[i] = true
 		}
 
 		options = append(options, label)
 	}
 
-	// Default: select all scalar/enum fields
+	return options, expandableIndices
+}
+
+func (r *REPL) isExpandableField(fieldDef *ast.Definition, depth int) bool {
+	if fieldDef == nil {
+		return false
+	}
+
+	return (fieldDef.Kind == ast.Object || fieldDef.Kind == ast.Interface) && depth < maxSelectionDepth
+}
+
+func (r *REPL) getDefaultSelectedFields(fields []*ast.FieldDefinition, options []string) []string {
 	var defaultSelected []string
 
-	for i, f := range availableFields {
+	for i, f := range fields {
 		fieldTypeName := gql.UnwrapType(f.Type)
 		fieldDef := r.schema.Types[fieldTypeName]
 
 		if fieldDef == nil || fieldDef.Kind == ast.Scalar || fieldDef.Kind == ast.Enum {
-			defaultSelected = append(defaultSelected, options[i+1]) // +1 for Select All option
+			defaultSelected = append(defaultSelected, options[i+1])
 		}
 	}
 
+	return defaultSelected
+}
+
+func (r *REPL) promptFieldSelection(typeName string, options, defaultSelected []string) ([]string, error) {
 	cyan := color.New(color.FgCyan).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 
@@ -545,35 +542,29 @@ func (r *REPL) selectFieldsInteractive(t *ast.Type, depth int) ([]selectedField,
 		return nil, errInputCanceled
 	}
 
-	// Check if "Select All" was selected
-	selectAll := false
-	for _, s := range selected {
-		if s == selectAllOption {
-			selectAll = true
+	return selected, nil
+}
 
-			break
-		}
-	}
+func (r *REPL) buildSelectedFields(
+	fields []*ast.FieldDefinition,
+	options, selected []string,
+	expandableIndices map[int]bool,
+	depth int,
+) ([]selectedField, error) {
+	selectAll := containsSelectAll(selected)
+	selectedMap := makeSelectedMap(selected)
 
-	// Build result from selected options
-	selectedMap := make(map[string]bool)
-	for _, s := range selected {
-		selectedMap[s] = true
-	}
+	result := make([]selectedField, 0, len(fields))
 
-	var result []selectedField
+	for i, f := range fields {
+		opt := options[i+1]
 
-	for i, f := range availableFields {
-		opt := options[i+1] // +1 for Select All option
-
-		// Include if Select All is checked, or if this specific option is checked
 		if !selectAll && !selectedMap[opt] {
 			continue
 		}
 
 		sf := selectedField{name: f.Name}
 
-		// Check if this field has nested object type and is expandable
 		if expandableIndices[i] {
 			children, err := r.selectFieldsInteractive(f.Type, depth+1)
 			if err != nil {
@@ -587,6 +578,26 @@ func (r *REPL) selectFieldsInteractive(t *ast.Type, depth int) ([]selectedField,
 	}
 
 	return result, nil
+}
+
+func containsSelectAll(selected []string) bool {
+	for _, s := range selected {
+		if s == selectAllOption {
+			return true
+		}
+	}
+
+	return false
+}
+
+func makeSelectedMap(selected []string) map[string]bool {
+	m := make(map[string]bool, len(selected))
+
+	for _, s := range selected {
+		m[s] = true
+	}
+
+	return m
 }
 
 // buildQueryWithSelection builds a query string with the selected fields.
@@ -635,34 +646,45 @@ func (r *REPL) buildSelectionString(fields []selectedField, depth int) string {
 	}
 
 	// Check if any field has children
-	hasNested := false
-	for _, f := range fields {
-		if len(f.children) > 0 {
-			hasNested = true
-
-			break
-		}
-	}
+	hasNested := hasNestedFields(fields)
 
 	// Format with newlines for nested, inline for simple
 	if hasNested {
-		var parts []string
-		indent := strings.Repeat("  ", depth+1)
-
-		for _, f := range fields {
-			if len(f.children) > 0 {
-				nested := r.buildSelectionString(f.children, depth+1)
-				parts = append(parts, fmt.Sprintf("\n%s%s %s", indent, f.name, nested))
-			} else {
-				parts = append(parts, fmt.Sprintf("\n%s%s", indent, f.name))
-			}
-		}
-
-		return "{" + strings.Join(parts, "") + "\n" + strings.Repeat("  ", depth) + "}"
+		return r.buildNestedSelectionString(fields, depth)
 	}
 
-	// Simple inline format
-	var names []string
+	return r.buildInlineSelectionString(fields)
+}
+
+func hasNestedFields(fields []selectedField) bool {
+	for _, f := range fields {
+		if len(f.children) > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *REPL) buildNestedSelectionString(fields []selectedField, depth int) string {
+	parts := make([]string, 0, len(fields))
+	indent := strings.Repeat("  ", depth+1)
+
+	for _, f := range fields {
+		if len(f.children) > 0 {
+			nested := r.buildSelectionString(f.children, depth+1)
+			parts = append(parts, fmt.Sprintf("\n%s%s %s", indent, f.name, nested))
+		} else {
+			parts = append(parts, fmt.Sprintf("\n%s%s", indent, f.name))
+		}
+	}
+
+	return "{" + strings.Join(parts, "") + "\n" + strings.Repeat("  ", depth) + "}"
+}
+
+func (r *REPL) buildInlineSelectionString(fields []selectedField) string {
+	names := make([]string, 0, len(fields))
+
 	for _, f := range fields {
 		names = append(names, f.name)
 	}
