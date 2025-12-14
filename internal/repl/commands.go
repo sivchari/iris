@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/AlecAivazis/survey/v2"
 	"github.com/fatih/color"
 	"github.com/vektah/gqlparser/v2/ast"
 
@@ -269,8 +270,6 @@ func (r *REPL) findField(def *ast.Definition, name string) *ast.FieldDefinition 
 }
 
 func (r *REPL) executeField(opType string, field *ast.FieldDefinition) error {
-	cyan := color.New(color.FgCyan).SprintFunc()
-
 	// Read arguments
 	args, err := r.readArgs(field.Arguments)
 	if err != nil {
@@ -283,19 +282,27 @@ func (r *REPL) executeField(opType string, field *ast.FieldDefinition) error {
 		return err
 	}
 
-	// Build query
-	query := r.buildQuery(opType, field, args)
+	// Select fields interactively
+	selection, err := r.selectFieldsInteractive(field.Type, 0)
+	if err != nil {
+		if errors.Is(err, errInputCanceled) {
+			fmt.Println("Canceled.")
 
-	fmt.Println()
-	fmt.Println(cyan("Query:"))
-	fmt.Println(query)
-	fmt.Println()
+			return nil
+		}
 
-	// Execute
+		return err
+	}
+
+	// Build and execute query
+	query := r.buildQueryWithSelection(opType, field, args, selection)
+
 	resp, err := r.client.Execute(context.Background(), &client.Request{Query: query})
 	if err != nil {
 		return fmt.Errorf("execute: %w", err)
 	}
+
+	fmt.Println()
 
 	return r.printResponse(resp)
 }
@@ -456,4 +463,209 @@ func (r *REPL) buildSelection(t *ast.Type) string {
 	}
 
 	return "{ " + strings.Join(fields, " ") + " }"
+}
+
+// selectedField represents a selected field with optional nested selections.
+type selectedField struct {
+	name     string
+	children []selectedField
+}
+
+const maxSelectionDepth = 3
+
+const selectAllOption = "Select All"
+
+// selectFieldsInteractive prompts the user to select fields interactively using checkboxes.
+func (r *REPL) selectFieldsInteractive(t *ast.Type, depth int) ([]selectedField, error) {
+	typeName := gql.UnwrapType(t)
+
+	def := r.schema.Types[typeName]
+	if def == nil || len(def.Fields) == 0 {
+		return nil, nil
+	}
+
+	// Filter out internal fields
+	var availableFields []*ast.FieldDefinition
+	for _, f := range def.Fields {
+		if !strings.HasPrefix(f.Name, "__") {
+			availableFields = append(availableFields, f)
+		}
+	}
+
+	if len(availableFields) == 0 {
+		return nil, nil
+	}
+
+	// Build options for checkbox (with Select All at the top)
+	options := []string{selectAllOption}
+	expandableIndices := make(map[int]bool)
+
+	for i, f := range availableFields {
+		fieldTypeName := gql.UnwrapType(f.Type)
+		fieldDef := r.schema.Types[fieldTypeName]
+
+		label := fmt.Sprintf("%s: %s", f.Name, gql.FormatType(f.Type))
+
+		if fieldDef != nil && (fieldDef.Kind == ast.Object || fieldDef.Kind == ast.Interface) {
+			if depth < maxSelectionDepth {
+				label += " (expandable)"
+				expandableIndices[i] = true
+			}
+		}
+
+		options = append(options, label)
+	}
+
+	// Default: select all scalar/enum fields
+	var defaultSelected []string
+
+	for i, f := range availableFields {
+		fieldTypeName := gql.UnwrapType(f.Type)
+		fieldDef := r.schema.Types[fieldTypeName]
+
+		if fieldDef == nil || fieldDef.Kind == ast.Scalar || fieldDef.Kind == ast.Enum {
+			defaultSelected = append(defaultSelected, options[i+1]) // +1 for Select All option
+		}
+	}
+
+	cyan := color.New(color.FgCyan).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+
+	fmt.Printf("\n%s fields for %s:\n", cyan("Select"), yellow(typeName))
+
+	var selected []string
+
+	prompt := &survey.MultiSelect{
+		Message: "↑↓:move  space:toggle  enter:confirm",
+		Options: options,
+		Default: defaultSelected,
+	}
+
+	if err := survey.AskOne(prompt, &selected); err != nil {
+		return nil, errInputCanceled
+	}
+
+	// Check if "Select All" was selected
+	selectAll := false
+	for _, s := range selected {
+		if s == selectAllOption {
+			selectAll = true
+
+			break
+		}
+	}
+
+	// Build result from selected options
+	selectedMap := make(map[string]bool)
+	for _, s := range selected {
+		selectedMap[s] = true
+	}
+
+	var result []selectedField
+
+	for i, f := range availableFields {
+		opt := options[i+1] // +1 for Select All option
+
+		// Include if Select All is checked, or if this specific option is checked
+		if !selectAll && !selectedMap[opt] {
+			continue
+		}
+
+		sf := selectedField{name: f.Name}
+
+		// Check if this field has nested object type and is expandable
+		if expandableIndices[i] {
+			children, err := r.selectFieldsInteractive(f.Type, depth+1)
+			if err != nil {
+				return nil, err
+			}
+
+			sf.children = children
+		}
+
+		result = append(result, sf)
+	}
+
+	return result, nil
+}
+
+// buildQueryWithSelection builds a query string with the selected fields.
+func (r *REPL) buildQueryWithSelection(opType string, field *ast.FieldDefinition, args map[string]any, selection []selectedField) string {
+	var sb strings.Builder
+
+	sb.WriteString(opType + " {\n  " + field.Name)
+
+	if len(args) > 0 {
+		sb.WriteString("(")
+
+		first := true
+		for k, v := range args {
+			if !first {
+				sb.WriteString(", ")
+			}
+
+			sb.WriteString(k + ": " + r.formatArg(v, r.findArgType(field, k)))
+
+			first = false
+		}
+
+		sb.WriteString(")")
+	}
+
+	// Add selection set
+	if len(selection) > 0 {
+		sb.WriteString(" ")
+		sb.WriteString(r.buildSelectionString(selection, 1))
+	} else {
+		// Fallback to auto-selection for scalar types
+		if sel := r.buildSelection(field.Type); sel != "" {
+			sb.WriteString(" " + sel)
+		}
+	}
+
+	sb.WriteString("\n}")
+
+	return sb.String()
+}
+
+// buildSelectionString converts selected fields to a GraphQL selection set string.
+func (r *REPL) buildSelectionString(fields []selectedField, depth int) string {
+	if len(fields) == 0 {
+		return ""
+	}
+
+	// Check if any field has children
+	hasNested := false
+	for _, f := range fields {
+		if len(f.children) > 0 {
+			hasNested = true
+
+			break
+		}
+	}
+
+	// Format with newlines for nested, inline for simple
+	if hasNested {
+		var parts []string
+		indent := strings.Repeat("  ", depth+1)
+
+		for _, f := range fields {
+			if len(f.children) > 0 {
+				nested := r.buildSelectionString(f.children, depth+1)
+				parts = append(parts, fmt.Sprintf("\n%s%s %s", indent, f.name, nested))
+			} else {
+				parts = append(parts, fmt.Sprintf("\n%s%s", indent, f.name))
+			}
+		}
+
+		return "{" + strings.Join(parts, "") + "\n" + strings.Repeat("  ", depth) + "}"
+	}
+
+	// Simple inline format
+	var names []string
+	for _, f := range fields {
+		names = append(names, f.name)
+	}
+
+	return "{ " + strings.Join(names, " ") + " }"
 }
