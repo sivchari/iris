@@ -1,0 +1,10 @@
+# Changelog
+
+## [v0.2.0](https://github.com/sivchari/iris/commits/v0.2.0) - 2025-12-15
+- setup tools by @sivchari in https://github.com/sivchari/iris/pull/1
+- add go.mod by @sivchari in https://github.com/sivchari/iris/pull/4
+- implement iris v0.1.0 by @sivchari in https://github.com/sivchari/iris/pull/2
+- add tagpr configuration by @sivchari in https://github.com/sivchari/iris/pull/6
+- ci(deps): bump actions/checkout from 5 to 6 by @dependabot[bot] in https://github.com/sivchari/iris/pull/3
+- feat: add interactive field selection for call command by @sivchari in https://github.com/sivchari/iris/pull/7
+- fix: remove checkout step and let govulncheck-action handle it by @sivchari in https://github.com/sivchari/iris/pull/10
