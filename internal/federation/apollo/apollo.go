@@ -54,9 +54,9 @@ func extractDirectivesFromLink(schema *ast.Schema) []string {
 			continue
 		}
 
-		// Check if URL contains federation
+		// Check if URL is Apollo Federation spec
 		urlArg := d.Arguments.ForName("url")
-		if urlArg == nil || !strings.Contains(urlArg.Value.Raw, "federation") {
+		if urlArg == nil || !strings.Contains(urlArg.Value.Raw, "specs.apollo.dev/federation") {
 			continue
 		}
 
