@@ -28,7 +28,7 @@ func (r *REPL) cmdHelp() error {
 		name, aliases, desc string
 	}{
 		{"help", "h, ?", "Show this help message"},
-		{"show", "", "Show schema info (types, queries, mutations)"},
+		{"show", "", "Show schema info (types, queries, mutations, federation)"},
 		{"desc", "describe", "Describe a type or field"},
 		{"call", "", "Call a query or mutation interactively"},
 		{"exit", "quit, q", "Exit the REPL"},
@@ -56,7 +56,7 @@ func (r *REPL) cmdHelp() error {
 // cmdShow displays schema information.
 func (r *REPL) cmdShow(args []string) error {
 	if len(args) == 0 {
-		fmt.Println("Usage: show [types|queries|mutations]")
+		fmt.Println("Usage: show [types|queries|mutations|federation]")
 
 		return nil
 	}
@@ -77,8 +77,44 @@ func (r *REPL) cmdShow(args []string) error {
 		r.showFields(cyan("Queries:"), r.schema.Query)
 	case "mutations":
 		r.showFields(cyan("Mutations:"), r.schema.Mutation)
+	case "federation":
+		return r.showFederation()
 	default:
-		return fmt.Errorf("unknown: %s (use: types, queries, mutations)", args[0])
+		return fmt.Errorf("unknown: %s (use: types, queries, mutations, federation)", args[0])
+	}
+
+	return nil
+}
+
+func (r *REPL) showFederation() error {
+	cyan := color.New(color.FgCyan).SprintFunc()
+	yellow := color.New(color.FgYellow).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+
+	if r.federation == nil {
+		fmt.Println("No federation detected in this schema.")
+
+		return nil
+	}
+
+	fmt.Println(cyan("Federation Info:"))
+	fmt.Printf("  Provider: %s\n", green(r.federation.Provider.Name()))
+	fmt.Printf("  Is Subgraph: %t\n", r.federation.IsSubgraph)
+
+	if len(r.federation.Entities) > 0 {
+		fmt.Println()
+		fmt.Println(cyan("Entities:"))
+
+		for _, e := range r.federation.Entities {
+			fmt.Printf("  %s\n", yellow(e))
+		}
+	}
+
+	fmt.Println()
+	fmt.Println(cyan("Federation Directives:"))
+
+	for _, d := range r.federation.Provider.GetFederationDirectives() {
+		fmt.Printf("  @%s\n", d)
 	}
 
 	return nil
