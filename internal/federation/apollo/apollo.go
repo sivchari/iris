@@ -18,7 +18,9 @@ func init() {
 }
 
 // Provider implements Apollo Federation support.
-type Provider struct{}
+type Provider struct {
+	detectedDirectives []string
+}
 
 // Name returns the provider name.
 func (p *Provider) Name() string {
@@ -27,12 +29,8 @@ func (p *Provider) Name() string {
 
 // Detect checks if the schema uses Apollo Federation.
 func (p *Provider) Detect(schema *ast.Schema) bool {
-	// Check for Federation directives
-	for _, d := range schema.Directives {
-		if isFederationDirective(d.Name) {
-			return true
-		}
-	}
+	// Detect from @link directive (Federation v2)
+	p.detectedDirectives = extractDirectivesFromLink(schema)
 
 	// Check for _service query
 	if schema.Query != nil {
@@ -43,7 +41,40 @@ func (p *Provider) Detect(schema *ast.Schema) bool {
 		}
 	}
 
-	return false
+	return len(p.detectedDirectives) > 0
+}
+
+// extractDirectivesFromLink extracts federation directives from @link directive.
+func extractDirectivesFromLink(schema *ast.Schema) []string {
+	var directives []string
+
+	// Check schema-level directives for @link
+	for _, d := range schema.SchemaDirectives {
+		if d.Name != "link" {
+			continue
+		}
+
+		// Check if URL contains federation
+		urlArg := d.Arguments.ForName("url")
+		if urlArg == nil || !strings.Contains(urlArg.Value.Raw, "federation") {
+			continue
+		}
+
+		// Extract imported directives
+		importArg := d.Arguments.ForName("import")
+		if importArg == nil {
+			continue
+		}
+
+		for _, child := range importArg.Value.Children {
+			name := strings.TrimPrefix(child.Value.Raw, "@")
+			if name != "" {
+				directives = append(directives, name)
+			}
+		}
+	}
+
+	return directives
 }
 
 // GetServiceSDL retrieves the SDL from _service query.
@@ -72,19 +103,9 @@ func (p *Provider) GetServiceSDL(ctx context.Context, c *client.Client) (string,
 	return result.Service.SDL, nil
 }
 
-// GetFederationDirectives returns Apollo Federation directives.
+// GetFederationDirectives returns detected Apollo Federation directives.
 func (p *Provider) GetFederationDirectives() []string {
-	return []string{
-		"key",
-		"external",
-		"requires",
-		"provides",
-		"extends",
-		"shareable",
-		"inaccessible",
-		"override",
-		"tag",
-	}
+	return p.detectedDirectives
 }
 
 // FormatEntityInfo formats entity information for display.
@@ -116,14 +137,4 @@ func (p *Provider) FormatEntityInfo(schema *ast.Schema) string {
 	}
 
 	return sb.String()
-}
-
-func isFederationDirective(name string) bool {
-	switch name {
-	case "key", "external", "requires", "provides", "extends",
-		"shareable", "inaccessible", "override", "tag":
-		return true
-	}
-
-	return false
 }
