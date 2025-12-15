@@ -14,6 +14,8 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 
 	"github.com/sivchari/iris/internal/client"
+	"github.com/sivchari/iris/internal/federation"
+	_ "github.com/sivchari/iris/internal/federation/apollo" // Register Apollo Federation provider
 	"github.com/sivchari/iris/internal/gql"
 )
 
@@ -21,18 +23,20 @@ var errExit = fmt.Errorf("exit")
 
 // REPL is the interactive GraphQL shell.
 type REPL struct {
-	client    *client.Client
-	schema    *ast.Schema
-	completer *gql.Completer
-	prompt    *prompt.Prompt
+	client     *client.Client
+	schema     *ast.Schema
+	federation *federation.Info
+	completer  *gql.Completer
+	prompt     *prompt.Prompt
 }
 
 // New creates a new REPL.
 func New(c *client.Client, schema *ast.Schema) *REPL {
 	r := &REPL{
-		client:    c,
-		schema:    schema,
-		completer: gql.NewCompleter(schema),
+		client:     c,
+		schema:     schema,
+		federation: federation.Detect(schema),
+		completer:  gql.NewCompleter(schema),
 	}
 
 	r.prompt = prompt.New(
@@ -54,8 +58,15 @@ func New(c *client.Client, schema *ast.Schema) *REPL {
 // Run starts the REPL.
 func (r *REPL) Run() error {
 	cyan := color.New(color.FgCyan).SprintFunc()
+	green := color.New(color.FgGreen).SprintFunc()
+
 	fmt.Println(cyan("iris") + " - GraphQL REPL")
 	fmt.Println("Type 'help' for commands, TAB for completion.")
+
+	if r.federation != nil {
+		fmt.Printf("%s: %s (subgraph)\n", green("Federation"), r.federation.Provider.Name())
+	}
+
 	fmt.Println()
 
 	r.prompt.Run()
