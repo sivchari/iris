@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.3.0](https://github.com/sivchari/iris/compare/v0.2.1...v0.3.0) - 2025-12-15
+- feat: add GraphQL Federation support with plugin architecture by @sivchari in https://github.com/sivchari/iris/pull/12
+- cut v0.3.0 by @sivchari in https://github.com/sivchari/iris/pull/14
+
 ## [v0.2.1](https://github.com/sivchari/iris/compare/v0.2.0...v0.2.1) - 2025-12-15
 - ci(deps): bump actions/upload-artifact from 5 to 6 by @dependabot[bot] in https://github.com/sivchari/iris/pull/9
 - ci(deps): bump actions/cache from 4 to 5 by @dependabot[bot] in https://github.com/sivchari/iris/pull/8
