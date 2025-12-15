@@ -17,7 +17,7 @@ func TestCompleter_completeShow(t *testing.T) {
 		{
 			name:   "empty prefix",
 			prefix: "",
-			want:   []string{"types", "queries", "mutations"},
+			want:   []string{"types", "queries", "mutations", "federation"},
 		},
 		{
 			name:   "prefix t",
@@ -33,6 +33,11 @@ func TestCompleter_completeShow(t *testing.T) {
 			name:   "prefix m",
 			prefix: "m",
 			want:   []string{"mutations"},
+		},
+		{
+			name:   "prefix f",
+			prefix: "f",
+			want:   []string{"federation"},
 		},
 		{
 			name:   "no match",

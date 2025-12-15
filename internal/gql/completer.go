@@ -76,6 +76,7 @@ func (c *Completer) completeShow(prefix string) []prompt.Suggest {
 		{Text: "types", Description: "List types"},
 		{Text: "queries", Description: "List queries"},
 		{Text: "mutations", Description: "List mutations"},
+		{Text: "federation", Description: "Show federation info"},
 	}
 	if prefix == "" {
 		return suggests

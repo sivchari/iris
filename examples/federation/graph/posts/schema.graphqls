@@ -1,0 +1,45 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@external", "@requires"])
+
+extend type Query {
+  """
+  Get all posts
+  """
+  posts: [Post!]!
+
+  """
+  Get a post by ID
+  """
+  post(id: ID!): Post
+}
+
+"""
+Post entity
+"""
+type Post @key(fields: "id") {
+  """
+  Post ID
+  """
+  id: ID!
+
+  """
+  Post title
+  """
+  title: String!
+
+  """
+  Post body content
+  """
+  body: String!
+
+  """
+  Author user ID
+  """
+  authorId: ID!
+
+  """
+  Author of the post (resolved from User service)
+  """
+  author: User!
+}
+
