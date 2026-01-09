@@ -9,6 +9,7 @@ iris is an interactive GraphQL REPL client, inspired by [evans](https://github.c
 - Execute queries and mutations interactively
 - Custom HTTP headers support
 - Pipe and file input support
+- GraphQL Federation support (Apollo Federation v2)
 
 ## Installation
 
@@ -71,6 +72,27 @@ iris> { users { id name } }
 | `--header` | `-H` | HTTP header (can be specified multiple times) |
 | `--query` | `-q` | Execute query directly |
 | `--file` | `-f` | Read query from file |
+
+## Federation Support
+
+iris automatically detects GraphQL Federation schemas and displays federation-specific information.
+
+### Detection
+
+When connecting to a Federation-enabled endpoint, iris detects:
+- Apollo Federation v2 directives (`@link`, `@key`, `@external`, etc.)
+- Federation service query (`_service { sdl }`)
+
+### Federation Commands
+
+```
+iris> show types    # Shows entity types with @key directives
+iris> desc User     # Shows federation directives on types
+```
+
+### Example
+
+See [examples/federation](examples/federation) for a complete Federation setup example.
 
 ## License
 
