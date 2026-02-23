@@ -7,7 +7,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/ktr0731/go-prompt v0.2.4
 	github.com/spf13/cobra v1.10.2
-	github.com/vektah/gqlparser/v2 v2.5.31
+	github.com/vektah/gqlparser/v2 v2.5.32
 )
 
 require (
